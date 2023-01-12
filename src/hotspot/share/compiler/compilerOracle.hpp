@@ -58,6 +58,7 @@ class methodHandle;
   option(BreakAtExecute, "BreakAtExecute", Bool) \
   option(BreakAtCompile, "BreakAtCompile", Bool) \
   option(PrintAssembly, "PrintAssembly", Bool) \
+  option(PrintCompilation, "PrintCompilation", Bool) \
   option(PrintInlining, "PrintInlining", Bool) \
   option(PrintIntrinsics, "PrintIntrinsics", Bool) \
   option(PrintNMethods, "PrintNMethods", Bool)   \
@@ -79,6 +80,7 @@ class methodHandle;
   option(TraceOptoPipelining, "TraceOptoPipelining", Bool) \
   option(TraceOptoOutput, "TraceOptoOutput", Bool) \
   option(TraceSpilling, "TraceSpilling", Bool) \
+NOT_PRODUCT(option(TraceEscapeAnalysis, "TraceEscapeAnalysis", Bool)) \
 NOT_PRODUCT(option(PrintIdeal, "PrintIdeal", Bool))  \
 NOT_PRODUCT(option(PrintIdealPhase, "PrintIdealPhase", Ccstrlist)) \
 NOT_PRODUCT(option(IGVPrintLevel, "IGVPrintLevel", Intx)) \
@@ -133,6 +135,9 @@ class CompilerOracle : AllStatic {
 
   // Tells whether we want to disallow inlining of this method
   static bool should_not_inline(const methodHandle& method);
+
+  // Tells whether this method changes Thread.currentThread()
+  static bool changes_current_thread(const methodHandle& method);
 
   // Tells whether we should print the assembly for this method
   static bool should_print(const methodHandle& method);

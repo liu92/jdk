@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2019, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2022, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -76,7 +76,7 @@ public:
             LIRAddressOpr base, LIRAddressOpr offset, BasicType type,
             CodeEmitInfo* patch_emit_info = NULL, CodeEmitInfo* access_emit_info = NULL) :
     _gen(gen),
-    _decorators(AccessInternal::decorator_fixup(decorators)),
+    _decorators(AccessInternal::decorator_fixup(decorators, type)),
     _base(base),
     _offset(offset),
     _type(type),
@@ -107,7 +107,7 @@ public:
 };
 
 // The BarrierSetC1 class is the main entry point for the GC backend of the Access API in C1.
-// It is called by the LIRGenerator::access_* functions, which is the main entry poing for
+// It is called by the LIRGenerator::access_* functions, which is the main entry point for
 // access calls in C1.
 
 class BarrierSetC1: public CHeapObj<mtGC> {

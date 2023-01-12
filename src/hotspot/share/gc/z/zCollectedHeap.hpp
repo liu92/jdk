@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, 2022, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,6 +31,7 @@
 #include "gc/z/zInitialize.hpp"
 #include "gc/z/zRuntimeWorkers.hpp"
 #include "memory/metaspace.hpp"
+#include "services/memoryUsage.hpp"
 
 class ZDirector;
 class ZDriver;
@@ -72,8 +73,7 @@ public:
 
   virtual bool is_maximal_no_gc() const;
   virtual bool is_in(const void* p) const;
-
-  virtual uint32_t hash_oop(oop obj) const;
+  virtual bool requires_barriers(stackChunkOop obj) const;
 
   virtual oop array_allocate(Klass* klass, size_t size, int length, bool do_zero, TRAPS);
   virtual HeapWord* mem_allocate(size_t size, bool* gc_overhead_limit_was_exceeded);
@@ -91,6 +91,7 @@ public:
 
   virtual bool uses_stack_watermark_barrier() const;
 
+  virtual MemoryUsage memory_usage();
   virtual GrowableArray<GCMemoryManager*> memory_managers();
   virtual GrowableArray<MemoryPool*> memory_pools();
 
@@ -101,7 +102,6 @@ public:
 
   virtual void register_nmethod(nmethod* nm);
   virtual void unregister_nmethod(nmethod* nm);
-  virtual void flush_nmethod(nmethod* nm);
   virtual void verify_nmethod(nmethod* nmethod);
 
   virtual WorkerThreads* safepoint_workers();

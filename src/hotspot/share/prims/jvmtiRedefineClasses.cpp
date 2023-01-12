@@ -104,7 +104,7 @@ void VM_RedefineClasses::lock_classes() {
   MonitorLocker ml(RedefineClasses_lock);
 
   if (redef_classes == NULL) {
-    redef_classes = new(ResourceObj::C_HEAP, mtClass) GrowableArray<Klass*>(1, mtClass);
+    redef_classes = new (mtClass) GrowableArray<Klass*>(1, mtClass);
     state->set_classes_being_redefined(redef_classes);
   }
 
@@ -237,6 +237,10 @@ bool VM_RedefineClasses::doit_prologue() {
 void VM_RedefineClasses::doit() {
   Thread* current = Thread::current();
 
+  if (log_is_enabled(Info, redefine, class, timer)) {
+    _timer_vm_op_doit.start();
+  }
+
 #if INCLUDE_CDS
   if (UseSharedSpaces) {
     // Sharing is enabled so we remap the shared readonly space to
@@ -246,6 +250,7 @@ void VM_RedefineClasses::doit() {
     if (!MetaspaceShared::remap_shared_readonly_as_readwrite()) {
       log_info(redefine, class, load)("failed to remap shared readonly space to readwrite, private");
       _res = JVMTI_ERROR_INTERNAL;
+      _timer_vm_op_doit.stop();
       return;
     }
   }
@@ -295,6 +300,8 @@ void VM_RedefineClasses::doit() {
 
   // Clean up any metadata now unreferenced while MetadataOnStackMark is set.
   ClassLoaderDataGraph::clean_deallocate_lists(false);
+
+  _timer_vm_op_doit.stop();
 }
 
 void VM_RedefineClasses::doit_epilogue() {
@@ -309,8 +316,7 @@ void VM_RedefineClasses::doit_epilogue() {
   if (log_is_enabled(Info, redefine, class, timer)) {
     // Used to have separate timers for "doit" and "all", but the timer
     // overhead skewed the measurements.
-    julong doit_time = _timer_rsc_phase1.milliseconds() +
-                       _timer_rsc_phase2.milliseconds();
+    julong doit_time = _timer_vm_op_doit.milliseconds();
     julong all_time = _timer_vm_op_prologue.milliseconds() + doit_time;
 
     log_info(redefine, class, timer)
@@ -1222,7 +1228,7 @@ jvmtiError VM_RedefineClasses::compare_and_normalize_class_versions(
 
 
 // Find new constant pool index value for old constant pool index value
-// by seaching the index map. Returns zero (0) if there is no mapped
+// by searching the index map. Returns zero (0) if there is no mapped
 // value for the old constant pool index.
 int VM_RedefineClasses::find_new_index(int old_index) {
   if (_index_map_count == 0) {
@@ -1248,7 +1254,7 @@ int VM_RedefineClasses::find_new_index(int old_index) {
 
 
 // Find new bootstrap specifier index value for old bootstrap specifier index
-// value by seaching the index map. Returns unused index (-1) if there is
+// value by searching the index map. Returns unused index (-1) if there is
 // no mapped value for the old bootstrap specifier index.
 int VM_RedefineClasses::find_new_operand_index(int old_index) {
   if (_operands_index_map_count == 0) {
@@ -1318,7 +1324,7 @@ class RedefineVerifyMark : public StackObj {
  private:
   JvmtiThreadState* _state;
   Klass*            _scratch_class;
-  Handle            _scratch_mirror;
+  OopHandle         _scratch_mirror;
 
  public:
 
@@ -1326,14 +1332,14 @@ class RedefineVerifyMark : public StackObj {
                      JvmtiThreadState* state) : _state(state), _scratch_class(scratch_class)
   {
     _state->set_class_versions_map(the_class, scratch_class);
-    _scratch_mirror = Handle(_state->get_thread(), _scratch_class->java_mirror());
-    _scratch_class->replace_java_mirror(the_class->java_mirror());
+    _scratch_mirror = the_class->java_mirror_handle();  // this is a copy that is swapped
+    _scratch_class->swap_java_mirror_handle(_scratch_mirror);
   }
 
   ~RedefineVerifyMark() {
     // Restore the scratch class's mirror, so when scratch_class is removed
     // the correct mirror pointing to it can be cleared.
-    _scratch_class->replace_java_mirror(_scratch_mirror());
+    _scratch_class->swap_java_mirror_handle(_scratch_mirror);
     _state->clear_class_versions_map();
   }
 };
@@ -1856,13 +1862,14 @@ jvmtiError VM_RedefineClasses::merge_cp_and_rewrite(
   if (old_cp->has_dynamic_constant()) {
     scratch_cp->set_has_dynamic_constant();
   }
-  // Copy attributes from scratch_cp to merge_cp
-  merge_cp->copy_fields(scratch_cp());
 
   log_info(redefine, class, constantpool)("merge_cp_len=%d, index_map_len=%d", merge_cp_length, _index_map_count);
 
   if (_index_map_count == 0) {
     // there is nothing to map between the new and merged constant pools
+
+    // Copy attributes from scratch_cp to merge_cp
+    merge_cp->copy_fields(scratch_cp());
 
     if (old_cp->length() == scratch_cp->length()) {
       // The old and new constant pools are the same length and the
@@ -1916,6 +1923,9 @@ jvmtiError VM_RedefineClasses::merge_cp_and_rewrite(
     if (!rewrite_cp_refs(scratch_class)) {
       return JVMTI_ERROR_INTERNAL;
     }
+
+    // Copy attributes from scratch_cp to merge_cp (should be done after rewrite_cp_refs())
+    merge_cp->copy_fields(scratch_cp());
 
     // Replace the new constant pool with a shrunken copy of the
     // merged constant pool so now the rewritten bytecodes have
@@ -3492,10 +3502,9 @@ void VM_RedefineClasses::rewrite_cp_refs_in_verification_type_info(
 } // end rewrite_cp_refs_in_verification_type_info()
 
 
-// Change the constant pool associated with klass scratch_class to
-// scratch_cp. If shrink is true, then scratch_cp_length elements
-// are copied from scratch_cp to a smaller constant pool and the
-// smaller constant pool is associated with scratch_class.
+// Change the constant pool associated with klass scratch_class to scratch_cp.
+// scratch_cp_length elements are copied from scratch_cp to a smaller constant pool
+// and the smaller constant pool is associated with scratch_class.
 void VM_RedefineClasses::set_new_constant_pool(
        ClassLoaderData* loader_data,
        InstanceKlass* scratch_class, constantPoolHandle scratch_cp,
@@ -4320,20 +4329,18 @@ void VM_RedefineClasses::redefine_single_class(Thread* current, jclass the_jclas
   int emcp_method_count = check_methods_and_mark_as_obsolete();
   transfer_old_native_function_registrations(the_class);
 
-  // The class file bytes from before any retransformable agents mucked
-  // with them was cached on the scratch class, move to the_class.
-  // Note: we still want to do this if nothing needed caching since it
-  // should get cleared in the_class too.
-  if (the_class->get_cached_class_file() == 0) {
-    // the_class doesn't have a cache yet so copy it
-    the_class->set_cached_class_file(scratch_class->get_cached_class_file());
-  }
-  else if (scratch_class->get_cached_class_file() !=
-           the_class->get_cached_class_file()) {
-    // The same class can be present twice in the scratch classes list or there
+  if (scratch_class->get_cached_class_file() != the_class->get_cached_class_file()) {
+    // 1. the_class doesn't have a cache yet, scratch_class does have a cache.
+    // 2. The same class can be present twice in the scratch classes list or there
     // are multiple concurrent RetransformClasses calls on different threads.
-    // In such cases we have to deallocate scratch_class cached_class_file.
-    os::free(scratch_class->get_cached_class_file());
+    // the_class and scratch_class have the same cached bytes, but different buffers.
+    // In such cases we need to deallocate one of the buffers.
+    // 3. RedefineClasses and the_class has cached bytes from a previous transformation.
+    // In the case we need to use class bytes from scratch_class.
+    if (the_class->get_cached_class_file() != nullptr) {
+      os::free(the_class->get_cached_class_file());
+    }
+    the_class->set_cached_class_file(scratch_class->get_cached_class_file());
   }
 
   // NULL out in scratch class to not delete twice.  The class to be redefined
@@ -4357,10 +4364,6 @@ void VM_RedefineClasses::redefine_single_class(Thread* current, jclass the_jclas
 
   // Leave arrays of jmethodIDs and itable index cache unchanged
 
-  // Copy the "source file name" attribute from new class version
-  the_class->set_source_file_name_index(
-    scratch_class->source_file_name_index());
-
   // Copy the "source debug extension" attribute from new class version
   the_class->set_source_debug_extension(
     scratch_class->source_debug_extension(),
@@ -4368,16 +4371,9 @@ void VM_RedefineClasses::redefine_single_class(Thread* current, jclass the_jclas
     (int)strlen(scratch_class->source_debug_extension()));
 
   // Use of javac -g could be different in the old and the new
-  if (scratch_class->access_flags().has_localvariable_table() !=
-      the_class->access_flags().has_localvariable_table()) {
-
-    AccessFlags flags = the_class->access_flags();
-    if (scratch_class->access_flags().has_localvariable_table()) {
-      flags.set_has_localvariable_table();
-    } else {
-      flags.clear_has_localvariable_table();
-    }
-    the_class->set_access_flags(flags);
+  if (scratch_class->has_localvariable_table() !=
+      the_class->has_localvariable_table()) {
+    the_class->set_has_localvariable_table(scratch_class->has_localvariable_table());
   }
 
   swap_annotations(the_class, scratch_class);
@@ -4400,7 +4396,9 @@ void VM_RedefineClasses::redefine_single_class(Thread* current, jclass the_jclas
     scratch_class->enclosing_method_method_index());
   scratch_class->set_enclosing_method_indices(old_class_idx, old_method_idx);
 
-  the_class->set_has_been_redefined();
+  if (!the_class->has_been_redefined()) {
+    the_class->set_has_been_redefined();
+  }
 
   // Scratch class is unloaded but still needs cleaning, and skipping for CDS.
   scratch_class->set_is_scratch_class();

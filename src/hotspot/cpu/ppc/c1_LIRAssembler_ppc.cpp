@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2000, 2021, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2012, 2021 SAP SE. All rights reserved.
+ * Copyright (c) 2000, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2022 SAP SE. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -38,10 +38,12 @@
 #include "oops/compressedOops.hpp"
 #include "oops/objArrayKlass.hpp"
 #include "runtime/frame.inline.hpp"
+#include "runtime/os.inline.hpp"
 #include "runtime/safepointMechanism.inline.hpp"
 #include "runtime/sharedRuntime.hpp"
 #include "runtime/stubRoutines.hpp"
 #include "runtime/vm_version.hpp"
+#include "utilities/macros.hpp"
 #include "utilities/powerOfTwo.hpp"
 
 #define __ _masm->
@@ -166,13 +168,6 @@ void LIR_Assembler::osr_entry() {
 
 
 int LIR_Assembler::emit_exception_handler() {
-  // If the last instruction is a call (typically to do a throw which
-  // is coming at the end after block reordering) the return address
-  // must still point into the code area in order to avoid assertion
-  // failures when searching for the corresponding bci => add a nop
-  // (was bug 5/14/1999 - gri).
-  __ nop();
-
   // Generate code for the exception handler.
   address handler_base = __ start_a_stub(exception_handler_size());
 
@@ -246,13 +241,6 @@ int LIR_Assembler::emit_unwind_handler() {
 
 
 int LIR_Assembler::emit_deopt_handler() {
-  // If the last instruction is a call (typically to do a throw which
-  // is coming at the end after block reordering) the return address
-  // must still point into the code area in order to avoid assertion
-  // failures when searching for the corresponding bci => add a nop
-  // (was bug 5/14/1999 - gri).
-  __ nop();
-
   // Generate code for deopt handler.
   address handler_base = __ start_a_stub(deopt_handler_size());
 
@@ -589,7 +577,7 @@ void LIR_Assembler::emit_opConvert(LIR_OpConvert* op) {
     case Bytecodes::_f2i: {
       bool dst_in_memory = !VM_Version::has_mtfprd();
       FloatRegister rsrc = (code == Bytecodes::_d2i) ? src->as_double_reg() : src->as_float_reg();
-      Address       addr = dst_in_memory ? frame_map()->address_for_slot(dst->double_stack_ix()) : NULL;
+      Address       addr = dst_in_memory ? frame_map()->address_for_slot(dst->double_stack_ix()) : Address();
       Label L;
       // Result must be 0 if value is NaN; test by comparing value to itself.
       __ fcmpu(CCR0, rsrc, rsrc);
@@ -613,7 +601,7 @@ void LIR_Assembler::emit_opConvert(LIR_OpConvert* op) {
     case Bytecodes::_f2l: {
       bool dst_in_memory = !VM_Version::has_mtfprd();
       FloatRegister rsrc = (code == Bytecodes::_d2l) ? src->as_double_reg() : src->as_float_reg();
-      Address       addr = dst_in_memory ? frame_map()->address_for_slot(dst->double_stack_ix()) : NULL;
+      Address       addr = dst_in_memory ? frame_map()->address_for_slot(dst->double_stack_ix()) : Address();
       Label L;
       // Result must be 0 if value is NaN; test by comparing value to itself.
       __ fcmpu(CCR0, rsrc, rsrc);
@@ -677,6 +665,7 @@ void LIR_Assembler::call(LIR_OpJavaCall* op, relocInfo::relocType rtype) {
   __ code()->set_insts_mark();
   __ bl(__ pc());
   add_call_info(code_offset(), op->info());
+  __ post_call_nop();
 }
 
 
@@ -704,6 +693,7 @@ void LIR_Assembler::ic_call(LIR_OpJavaCall* op) {
   // serves as dummy and the bl will be patched later.
   __ bl(__ pc());
   add_call_info(code_offset(), op->info());
+  __ post_call_nop();
 }
 
 void LIR_Assembler::explicit_null_check(Register addr, CodeEmitInfo* info) {
@@ -1547,8 +1537,10 @@ inline void load_to_reg(LIR_Assembler *lasm, LIR_Opr src, LIR_Opr dst) {
   }
 }
 
+void LIR_Assembler::cmove(LIR_Condition condition, LIR_Opr opr1, LIR_Opr opr2, LIR_Opr result, BasicType type,
+                          LIR_Opr cmp_opr1, LIR_Opr cmp_opr2) {
+  assert(cmp_opr1 == LIR_OprFact::illegalOpr && cmp_opr2 == LIR_OprFact::illegalOpr, "unnecessary cmp oprs on ppc");
 
-void LIR_Assembler::cmove(LIR_Condition condition, LIR_Opr opr1, LIR_Opr opr2, LIR_Opr result, BasicType type) {
   if (opr1->is_equal(opr2) || opr1->is_same_register(opr2)) {
     load_to_reg(this, opr1, result); // Condition doesn't matter.
     return;
@@ -2708,6 +2700,10 @@ void LIR_Assembler::emit_lock(LIR_OpLock* op) {
       //       simpler and requires less duplicated code - additionally, the
       //       slow locking code is the same in either case which simplifies
       //       debugging.
+      if (op->info() != NULL) {
+        add_debug_info_for_null_check_here(op->info());
+        __ null_check(obj);
+      }
       __ b(*op->stub()->entry());
     }
   } else {
@@ -2882,6 +2878,7 @@ void LIR_Assembler::rt_call(LIR_Opr result, address dest,
     __ bctrl();
     assert(info != NULL, "sanity");
     add_call_info_here(info);
+    __ post_call_nop();
     return;
   }
 
@@ -2889,6 +2886,7 @@ void LIR_Assembler::rt_call(LIR_Opr result, address dest,
   if (info != NULL) {
     add_call_info_here(info);
   }
+  __ post_call_nop();
 }
 
 
@@ -3094,7 +3092,7 @@ void LIR_Assembler::emit_profile_type(LIR_OpProfileType* op) {
   } else {
     __ cmpdi(CCR0, obj, 0);
     __ bne(CCR0, Lupdate);
-    __ stop("unexpect null obj");
+    __ stop("unexpected null obj");
 #endif
   }
 

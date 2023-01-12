@@ -66,32 +66,29 @@ import sun.reflect.misc.ReflectUtil;
  * written.
  *
  * <p>For example to write an object that can be read by the example in
- * ObjectInputStream:
- * <br>
- * <pre>
- *      FileOutputStream fos = new FileOutputStream("t.tmp");
- *      ObjectOutputStream oos = new ObjectOutputStream(fos);
- *
- *      oos.writeInt(12345);
- *      oos.writeObject("Today");
- *      oos.writeObject(new Date());
- *
- *      oos.close();
- * </pre>
+ * {@link ObjectInputStream}:
+ * {@snippet lang="java":
+ *      try (FileOutputStream fos = new FileOutputStream("t.tmp");
+ *           ObjectOutputStream oos = new ObjectOutputStream(fos)) {
+ *          oos.writeObject("Today");
+ *          oos.writeObject(LocalDateTime.now());
+ *      } catch (Exception ex) {
+ *          // handle exception
+ *      }
+ * }
  *
  * <p>Serializable classes that require special handling during the
  * serialization and deserialization process should implement methods
  * with the following signatures:
  *
- * <br>
- * <pre>
- * private void readObject(java.io.ObjectInputStream stream)
- *     throws IOException, ClassNotFoundException;
- * private void writeObject(java.io.ObjectOutputStream stream)
- *     throws IOException
- * private void readObjectNoData()
- *     throws ObjectStreamException;
- * </pre>
+ * {@snippet lang="java":
+ *     private void readObject(java.io.ObjectInputStream stream)
+ *         throws IOException, ClassNotFoundException;
+ *     private void writeObject(java.io.ObjectOutputStream stream)
+ *         throws IOException;
+ *     private void readObjectNoData()
+ *         throws ObjectStreamException;
+ * }
  *
  * <p>The method name, modifiers, return type, and number and type of
  * parameters must match exactly for the method to be used by
@@ -689,6 +686,7 @@ public class ObjectOutputStream
      * @param   val the byte to be written to the stream
      * @throws  IOException If an I/O error has occurred.
      */
+    @Override
     public void write(int val) throws IOException {
         bout.write(val);
     }
@@ -700,6 +698,7 @@ public class ObjectOutputStream
      * @param   buf the data to be written
      * @throws  IOException If an I/O error has occurred.
      */
+    @Override
     public void write(byte[] buf) throws IOException {
         bout.write(buf, 0, buf.length, false);
     }
@@ -710,8 +709,10 @@ public class ObjectOutputStream
      * @param   buf the data to be written
      * @param   off the start offset in the data
      * @param   len the number of bytes that are written
-     * @throws  IOException If an I/O error has occurred.
+     * @throws  IOException {@inheritDoc}
+     * @throws  IndexOutOfBoundsException {@inheritDoc}
      */
+    @Override
     public void write(byte[] buf, int off, int len) throws IOException {
         if (buf == null) {
             throw new NullPointerException();
@@ -724,8 +725,9 @@ public class ObjectOutputStream
      * Flushes the stream. This will write any buffered output bytes and flush
      * through to the underlying stream.
      *
-     * @throws  IOException If an I/O error has occurred.
+     * @throws  IOException {@inheritDoc}
      */
+    @Override
     public void flush() throws IOException {
         bout.flush();
     }
@@ -747,6 +749,7 @@ public class ObjectOutputStream
      *
      * @throws  IOException If an I/O error has occurred.
      */
+    @Override
     public void close() throws IOException {
         flush();
         clear();

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2022, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -59,6 +59,8 @@ ParCompactionManager::ParCompactionManager() {
   _start_array = old_gen()->start_array();
 
   reset_bitmap_query_cache();
+
+  _deferred_obj_array = new (mtGC) GrowableArray<HeapWord*>(10, mtGC);
 }
 
 void ParCompactionManager::initialize(ParMarkBitMap* mbm) {
@@ -87,7 +89,7 @@ void ParCompactionManager::initialize(ParMarkBitMap* mbm) {
   assert(ParallelScavengeHeap::heap()->workers().max_workers() != 0,
     "Not initialized?");
 
-  _shadow_region_array = new (ResourceObj::C_HEAP, mtGC) GrowableArray<size_t >(10, mtGC);
+  _shadow_region_array = new (mtGC) GrowableArray<size_t >(10, mtGC);
 
   _shadow_region_monitor = new Monitor(Mutex::nosafepoint, "CompactionManager_lock");
 }
@@ -113,7 +115,19 @@ ParCompactionManager::gc_thread_compaction_manager(uint index) {
   return _manager_array[index];
 }
 
-bool ParCompactionManager::transfer_from_overflow_stack(ObjArrayTask& task) {
+inline void ParCompactionManager::publish_and_drain_oop_tasks() {
+  oop obj;
+  while (marking_stack()->pop_overflow(obj)) {
+    if (!marking_stack()->try_push_to_taskqueue(obj)) {
+      follow_contents(obj);
+    }
+  }
+  while (marking_stack()->pop_local(obj)) {
+    follow_contents(obj);
+  }
+}
+
+bool ParCompactionManager::publish_or_pop_objarray_tasks(ObjArrayTask& task) {
   while (_objarray_stack.pop_overflow(task)) {
     if (!_objarray_stack.try_push_to_taskqueue(task)) {
       return true;
@@ -126,19 +140,12 @@ void ParCompactionManager::follow_marking_stacks() {
   do {
     // First, try to move tasks from the overflow stack into the shared buffer, so
     // that other threads can steal. Otherwise process the overflow stack first.
-    oop obj;
-    while (marking_stack()->pop_overflow(obj)) {
-      if (!marking_stack()->try_push_to_taskqueue(obj)) {
-        follow_contents(obj);
-      }
-    }
-    while (marking_stack()->pop_local(obj)) {
-      follow_contents(obj);
-    }
+    publish_and_drain_oop_tasks();
 
     // Process ObjArrays one at a time to avoid marking stack bloat.
     ObjArrayTask task;
-    if (transfer_from_overflow_stack(task) || _objarray_stack.pop_local(task)) {
+    if (publish_or_pop_objarray_tasks(task) ||
+        _objarray_stack.pop_local(task)) {
       follow_array((objArrayOop)task.obj(), task.index());
     }
   } while (!marking_stacks_empty());
@@ -158,6 +165,15 @@ void ParCompactionManager::drain_region_stacks() {
       PSParallelCompact::fill_and_update_region(this, region_index);
     }
   } while (!region_stack()->is_empty());
+}
+
+void ParCompactionManager::drain_deferred_objects() {
+  while (!_deferred_obj_array->is_empty()) {
+    HeapWord* addr = _deferred_obj_array->pop();
+    assert(addr != NULL, "expected a deferred object");
+    PSParallelCompact::update_deferred_object(this, addr);
+  }
+  _deferred_obj_array->clear_and_deallocate();
 }
 
 size_t ParCompactionManager::pop_shadow_region_mt_safe(PSParallelCompact::RegionData* region_ptr) {
@@ -188,6 +204,10 @@ void ParCompactionManager::push_shadow_region(size_t shadow_region) {
 
 void ParCompactionManager::remove_all_shadow_regions() {
   _shadow_region_array->clear();
+}
+
+void ParCompactionManager::push_deferred_object(HeapWord* addr) {
+  _deferred_obj_array->push(addr);
 }
 
 #ifdef ASSERT

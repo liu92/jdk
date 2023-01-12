@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2010, 2022, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -518,6 +518,9 @@ public class LambdaToMethod extends TreeTranslator {
                 throw new InternalError("Should not have an invalid kind");
         }
 
+        if (init != null) {
+            refSym = (MethodSymbol) types.binaryQualifier(refSym, init.type);
+        }
         List<JCExpression> indy_args = init==null? List.nil() : translate(List.of(init), localContext.prev);
 
 
@@ -703,7 +706,7 @@ public class LambdaToMethod extends TreeTranslator {
             JCBreak br = make.Break(null);
             breaks.add(br);
             List<JCStatement> stmts = entry.getValue().append(br).toList();
-            cases.add(make.Case(JCCase.STATEMENT, List.of(make.Literal(entry.getKey())), stmts, null));
+            cases.add(make.Case(JCCase.STATEMENT, List.of(make.ConstantCaseLabel(make.Literal(entry.getKey()))), stmts, null));
         }
         JCSwitch sw = make.Switch(deserGetter("getImplMethodName", syms.stringType), cases.toList());
         for (JCBreak br : breaks) {
@@ -755,6 +758,14 @@ public class LambdaToMethod extends TreeTranslator {
         String functionalInterfaceClass = classSig(targetType);
         String functionalInterfaceMethodName = samSym.getSimpleName().toString();
         String functionalInterfaceMethodSignature = typeSig(types.erasure(samSym.type));
+        Symbol baseMethod = refSym.baseSymbol();
+        Symbol origMethod = baseMethod.baseSymbol();
+        if (baseMethod != origMethod && origMethod.owner == syms.objectType.tsym) {
+            //the implementation method is a java.lang.Object method transferred to an
+            //interface that does not declare it. Runtime will refer to this method as to
+            //a java.lang.Object method, so do the same:
+            refSym = ((MethodSymbol) origMethod).asHandle();
+        }
         String implClass = classSig(types.erasure(refSym.owner.type));
         String implMethodName = refSym.getQualifiedName().toString();
         String implMethodSignature = typeSig(types.erasure(refSym.type));
@@ -2054,7 +2065,7 @@ public class LambdaToMethod extends TreeTranslator {
                         };
                         break;
                     case CAPTURED_OUTER_THIS:
-                        Name name = names.fromString(new String(sym.flatName().toString().replace('.', '$') + names.dollarThis));
+                        Name name = names.fromString(sym.flatName().toString().replace('.', '$') + names.dollarThis);
                         ret = new VarSymbol(SYNTHETIC | FINAL | PARAMETER, name, types.erasure(sym.type), translatedSym) {
                             @Override
                             public Symbol baseSymbol() {
@@ -2301,7 +2312,8 @@ public class LambdaToMethod extends TreeTranslator {
                 List<Type> tl = tree.getDescriptorType(types).getParameterTypes();
                 for (; tl.nonEmpty(); tl = tl.tail) {
                     Type pt = tl.head;
-                    return isIntersectionOrUnionType(pt);
+                    if (isIntersectionOrUnionType(pt))
+                        return true;
                 }
                 return false;
             }

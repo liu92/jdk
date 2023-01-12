@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2022, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,6 +28,7 @@
 #include "code/icBuffer.hpp"
 #include "code/vtableStubs.hpp"
 #include "compiler/oopMap.hpp"
+#include "gc/shared/barrierSetAssembler.hpp"
 #include "interpreter/interpreter.hpp"
 #include "logging/log.hpp"
 #include "memory/resourceArea.hpp"
@@ -102,11 +103,11 @@ public:
   };
 
   // all regs but Rthread (R10), FP (R7 or R11), SP and PC
-  // (altFP_7_11 is the one amoung R7 and R11 which is not FP)
+  // (altFP_7_11 is the one among R7 and R11 which is not FP)
 #define SAVED_BASE_REGS (RegisterSet(R0, R6) | RegisterSet(R8, R9) | RegisterSet(R12) | R14 | altFP_7_11)
 
 
-  //  When LR may be live in the nmethod from which we are comming
+  //  When LR may be live in the nmethod from which we are coming
   //  then lr_saved is true, the return address is saved before the
   //  call to save_live_register by the caller and LR contains the
   //  live value.
@@ -872,6 +873,10 @@ nmethod* SharedRuntime::generate_native_wrapper(MacroAssembler* masm,
   __ raw_push(FP, LR);
   __ mov(FP, SP);
   __ sub_slow(SP, SP, stack_size - 2*wordSize);
+
+  BarrierSetAssembler* bs = BarrierSet::barrier_set()->barrier_set_assembler();
+  assert(bs != NULL, "Sanity");
+  bs->nmethod_entry_barrier(masm);
 
   int frame_complete = __ pc() - start;
 
@@ -1867,13 +1872,3 @@ RuntimeStub* SharedRuntime::generate_resolve_blob(address destination, const cha
 
   return RuntimeStub::new_runtime_stub(name, &buffer, frame_complete, frame_size_words, oop_maps, true);
 }
-
-#ifdef COMPILER2
-RuntimeStub* SharedRuntime::make_native_invoker(address call_target,
-                                                int shadow_space_bytes,
-                                                const GrowableArray<VMReg>& input_registers,
-                                                const GrowableArray<VMReg>& output_registers) {
-  Unimplemented();
-  return nullptr;
-}
-#endif

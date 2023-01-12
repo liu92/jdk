@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2022, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -22,7 +22,6 @@
  *
  */
 #include "precompiled.hpp"
-#include "jvm.h"
 #include "classfile/classFileParser.hpp"
 #include "classfile/classFileStream.hpp"
 #include "classfile/classLoader.hpp"
@@ -39,6 +38,7 @@
 #include "classfile/verifier.hpp"
 #include "classfile/vmClasses.hpp"
 #include "classfile/vmSymbols.hpp"
+#include "jvm.h"
 #include "logging/log.hpp"
 #include "logging/logStream.hpp"
 #include "memory/allocation.hpp"
@@ -83,7 +83,6 @@
 #include "utilities/ostream.hpp"
 #include "utilities/resourceHash.hpp"
 #include "utilities/utf8.hpp"
-
 #if INCLUDE_CDS
 #include "classfile/systemDictionaryShared.hpp"
 #endif
@@ -141,6 +140,10 @@
 
 #define JAVA_19_VERSION                   63
 
+#define JAVA_20_VERSION                   64
+
+#define JAVA_21_VERSION                   65
+
 void ClassFileParser::set_class_bad_constant_seen(short bad_constant) {
   assert((bad_constant == JVM_CONSTANT_Module ||
           bad_constant == JVM_CONSTANT_Package) && _major_version >= JAVA_9_VERSION,
@@ -163,7 +166,6 @@ void ClassFileParser::parse_constant_pool_entries(const ClassFileStream* const s
   const ClassFileStream cfs1 = *stream;
   const ClassFileStream* const cfs = &cfs1;
 
-  assert(cfs->allocated_on_stack_or_embedded(), "should be local");
   debug_only(const u1* const old_current = stream->current();)
 
   // Used for batching symbol allocations.
@@ -968,6 +970,8 @@ public:
     _method_CallerSensitive,
     _method_ForceInline,
     _method_DontInline,
+    _method_ChangesCurrentThread,
+    _method_JvmtiMountTransition,
     _method_InjectedProfile,
     _method_LambdaForm_Compiled,
     _method_Hidden,
@@ -1646,7 +1650,7 @@ void ClassFileParser::parse_fields(const ClassFileStream* const cfs,
                                    CHECK);
   // Sometimes injected fields already exist in the Java source so
   // the fields array could be too long.  In that case the
-  // fields array is trimed. Also unused slots that were reserved
+  // fields array is trimmed. Also unused slots that were reserved
   // for generic signature indexes are discarded.
   {
     int i = 0;
@@ -1987,6 +1991,16 @@ AnnotationCollector::annotation_index(const ClassLoaderData* loader_data,
       if (!privileged)              break;  // only allow in privileged code
       return _method_DontInline;
     }
+    case VM_SYMBOL_ENUM_NAME(jdk_internal_vm_annotation_ChangesCurrentThread_signature): {
+      if (_location != _in_method)  break;  // only allow for methods
+      if (!privileged)              break;  // only allow in privileged code
+      return _method_ChangesCurrentThread;
+    }
+    case VM_SYMBOL_ENUM_NAME(jdk_internal_vm_annotation_JvmtiMountTransition_signature): {
+      if (_location != _in_method)  break;  // only allow for methods
+      if (!privileged)              break;  // only allow in privileged code
+      return _method_JvmtiMountTransition;
+    }
     case VM_SYMBOL_ENUM_NAME(java_lang_invoke_InjectedProfile_signature): {
       if (_location != _in_method)  break;  // only allow for methods
       if (!privileged)              break;  // only allow in privileged code
@@ -2033,7 +2047,7 @@ AnnotationCollector::annotation_index(const ClassLoaderData* loader_data,
     }
     case VM_SYMBOL_ENUM_NAME(jdk_internal_ValueBased_signature): {
       if (_location != _in_class)   break;  // only allow for classes
-      if (!privileged)              break;  // only allow in priviledged code
+      if (!privileged)              break;  // only allow in privileged code
       return _jdk_internal_ValueBased;
     }
     default: {
@@ -2063,6 +2077,10 @@ void MethodAnnotationCollector::apply_to(const methodHandle& m) {
     m->set_force_inline(true);
   if (has_annotation(_method_DontInline))
     m->set_dont_inline(true);
+  if (has_annotation(_method_ChangesCurrentThread))
+    m->set_changes_current_thread(true);
+  if (has_annotation(_method_JvmtiMountTransition))
+    m->set_jvmti_mount_transition(true);
   if (has_annotation(_method_InjectedProfile))
     m->set_has_injected_profile(true);
   if (has_annotation(_method_LambdaForm_Compiled) && m->intrinsic_id() == vmIntrinsics::_none)
@@ -2119,7 +2137,7 @@ void ClassFileParser::copy_localvariable_table(const ConstMethod* cm,
   ResourceMark rm(THREAD);
 
   typedef ResourceHashtable<LocalVariableTableElement, LocalVariableTableElement*,
-                            256, ResourceObj::RESOURCE_AREA, mtInternal,
+                            256, AnyObj::RESOURCE_AREA, mtInternal,
                             &LVT_Hash::hash, &LVT_Hash::equals> LVT_HashTable;
 
   LVT_HashTable* const table = new LVT_HashTable();
@@ -2242,18 +2260,16 @@ void ClassFileParser::copy_method_annotations(ConstMethod* cm,
 // Method* to save footprint, so we only know the size of the resulting Method* when the
 // entire method attribute is parsed.
 //
-// The promoted_flags parameter is used to pass relevant access_flags
-// from the method back up to the containing klass. These flag values
-// are added to klass's access_flags.
+// The has_localvariable_table parameter is used to pass up the value to InstanceKlass.
 
 Method* ClassFileParser::parse_method(const ClassFileStream* const cfs,
                                       bool is_interface,
                                       const ConstantPool* cp,
-                                      AccessFlags* const promoted_flags,
+                                      bool* const has_localvariable_table,
                                       TRAPS) {
   assert(cfs != NULL, "invariant");
   assert(cp != NULL, "invariant");
-  assert(promoted_flags != NULL, "invariant");
+  assert(has_localvariable_table != NULL, "invariant");
 
   ResourceMark rm(THREAD);
   // Parse fixed parts:
@@ -2741,6 +2757,7 @@ Method* ClassFileParser::parse_method(const ClassFileStream* const cfs,
                                      access_flags,
                                      &sizes,
                                      ConstMethod::NORMAL,
+                                     _cp->symbol_at(name_index),
                                      CHECK_NULL);
 
   ClassLoadingService::add_class_method_size(m->size()*wordSize);
@@ -2801,7 +2818,7 @@ Method* ClassFileParser::parse_method(const ClassFileStream* const cfs,
 
   // Copy class file LVT's/LVTT's into the HotSpot internal LVT.
   if (total_lvt_length > 0) {
-    promoted_flags->set_has_localvariable_table();
+    *has_localvariable_table = true;
     copy_localvariable_table(m->constMethod(),
                              lvt_cnt,
                              localvariable_table_length,
@@ -2857,18 +2874,15 @@ Method* ClassFileParser::parse_method(const ClassFileStream* const cfs,
 }
 
 
-// The promoted_flags parameter is used to pass relevant access_flags
-// from the methods back up to the containing klass. These flag values
-// are added to klass's access_flags.
 // Side-effects: populates the _methods field in the parser
 void ClassFileParser::parse_methods(const ClassFileStream* const cfs,
                                     bool is_interface,
-                                    AccessFlags* promoted_flags,
+                                    bool* const has_localvariable_table,
                                     bool* has_final_method,
                                     bool* declares_nonstatic_concrete_methods,
                                     TRAPS) {
   assert(cfs != NULL, "invariant");
-  assert(promoted_flags != NULL, "invariant");
+  assert(has_localvariable_table != NULL, "invariant");
   assert(has_final_method != NULL, "invariant");
   assert(declares_nonstatic_concrete_methods != NULL, "invariant");
 
@@ -2888,7 +2902,7 @@ void ClassFileParser::parse_methods(const ClassFileStream* const cfs,
       Method* method = parse_method(cfs,
                                     is_interface,
                                     _cp,
-                                    promoted_flags,
+                                    has_localvariable_table,
                                     CHECK);
 
       if (method->is_final()) {
@@ -3943,7 +3957,7 @@ void ClassFileParser::create_combined_annotations(TRAPS) {
     // assigned to InstanceKlass being constructed.
     _combined_annotations = annotations;
 
-    // The annotations arrays below has been transfered the
+    // The annotations arrays below has been transferred the
     // _combined_annotations so these fields can now be cleared.
     _class_annotations       = NULL;
     _class_type_annotations  = NULL;
@@ -4100,7 +4114,7 @@ void OopMapBlocksBuilder::compact() {
     return;
   }
   /*
-   * Since field layout sneeks in oops before values, we will be able to condense
+   * Since field layout sneaks in oops before values, we will be able to condense
    * blocks. There is potential to compact between super, own refs and values
    * containing refs.
    *
@@ -5314,6 +5328,10 @@ void ClassFileParser::fill_instance_klass(InstanceKlass* ik,
   assert(NULL == _record_components, "invariant");
   assert(NULL == _permitted_subclasses, "invariant");
 
+  if (_has_localvariable_table) {
+    ik->set_has_localvariable_table(true);
+  }
+
   if (_has_final_method) {
     ik->set_has_final_method();
   }
@@ -5558,7 +5576,6 @@ ClassFileParser::ClassFileParser(ClassFileStream* stream,
   _vtable_size(0),
   _itable_size(0),
   _num_miranda_methods(0),
-  _rt(REF_NONE),
   _protection_domain(cl_info->protection_domain()),
   _access_flags(),
   _pub_level(pub_level),
@@ -5578,6 +5595,7 @@ ClassFileParser::ClassFileParser(ClassFileStream* stream,
   _relax_verify(false),
   _has_nonstatic_concrete_methods(false),
   _declares_nonstatic_concrete_methods(false),
+  _has_localvariable_table(false),
   _has_final_method(false),
   _has_contended_fields(false),
   _has_finalizer(false),
@@ -5823,8 +5841,8 @@ void ClassFileParser::parse_stream(const ClassFileStream* const stream,
         Exceptions::fthrow(THREAD_AND_LOCATION,
                            vmSymbols::java_lang_NoClassDefFoundError(),
                            "%s (wrong name: %s)",
-                           class_name_in_cp->as_C_string(),
-                           _class_name->as_C_string()
+                           _class_name->as_C_string(),
+                           class_name_in_cp->as_C_string()
                            );
         return;
       } else {
@@ -5883,18 +5901,14 @@ void ClassFileParser::parse_stream(const ClassFileStream* const stream,
   assert(_fields != NULL, "invariant");
 
   // Methods
-  AccessFlags promoted_flags;
   parse_methods(stream,
                 _access_flags.is_interface(),
-                &promoted_flags,
+                &_has_localvariable_table,
                 &_has_final_method,
                 &_declares_nonstatic_concrete_methods,
                 CHECK);
 
   assert(_methods != NULL, "invariant");
-
-  // promote flags from parse_methods() to the klass' flags
-  _access_flags.add_promoted_flags(promoted_flags.as_int());
 
   if (_declares_nonstatic_concrete_methods) {
     _has_nonstatic_concrete_methods = true;
@@ -5933,7 +5947,7 @@ void ClassFileParser::mangle_hidden_class_name(InstanceKlass* const ik) {
     static volatile size_t counter = 0;
     Atomic::cmpxchg(&counter, (size_t)0, Arguments::default_SharedBaseAddress()); // initialize it
     size_t new_id = Atomic::add(&counter, (size_t)1);
-    jio_snprintf(addr_buf, 20, SIZE_FORMAT_HEX, new_id);
+    jio_snprintf(addr_buf, 20, SIZE_FORMAT_X, new_id);
   } else {
     jio_snprintf(addr_buf, 20, INTPTR_FORMAT, p2i(ik));
   }
@@ -5982,13 +5996,17 @@ void ClassFileParser::post_process_parsed_stream(const ClassFileStream* const st
         CHECK);
     }
     Handle loader(THREAD, _loader_data->class_loader());
-    _super_klass = (const InstanceKlass*)
+    if (loader.is_null() && super_class_name == vmSymbols::java_lang_Object()) {
+      _super_klass = vmClasses::Object_klass();
+    } else {
+      _super_klass = (const InstanceKlass*)
                        SystemDictionary::resolve_super_or_fail(_class_name,
                                                                super_class_name,
                                                                loader,
                                                                _protection_domain,
                                                                true,
                                                                CHECK);
+    }
   }
 
   if (_super_klass != NULL) {
@@ -6039,10 +6057,6 @@ void ClassFileParser::post_process_parsed_stream(const ClassFileStream* const st
   FieldLayoutBuilder lb(class_name(), super_klass(), _cp, _fields,
                         _parsed_annotations->is_contended(), _field_info);
   lb.build_layout();
-
-  // Compute reference typ
-  _rt = (NULL ==_super_klass) ? REF_NONE : _super_klass->reference_type();
-
 }
 
 void ClassFileParser::set_klass(InstanceKlass* klass) {
@@ -6074,6 +6088,33 @@ const ClassFileStream* ClassFileParser::clone_stream() const {
 
   return _stream->clone();
 }
+
+ReferenceType ClassFileParser::super_reference_type() const {
+  return _super_klass == NULL ? REF_NONE : _super_klass->reference_type();
+}
+
+bool ClassFileParser::is_instance_ref_klass() const {
+  // Only the subclasses of j.l.r.Reference are InstanceRefKlass.
+  // j.l.r.Reference itself is InstanceKlass because InstanceRefKlass denotes a
+  // klass requiring special treatment in ref-processing. The abstract
+  // j.l.r.Reference cannot be instantiated so doesn't partake in
+  // ref-processing.
+  return is_java_lang_ref_Reference_subclass();
+}
+
+bool ClassFileParser::is_java_lang_ref_Reference_subclass() const {
+  if (_super_klass == NULL) {
+    return false;
+  }
+
+  if (_super_klass->name() == vmSymbols::java_lang_ref_Reference()) {
+    // Direct subclass of j.l.r.Reference: Soft|Weak|Final|Phantom
+    return true;
+  }
+
+  return _super_klass->reference_type() != REF_NONE;
+}
+
 // ----------------------------------------------------------------------------
 // debugging
 

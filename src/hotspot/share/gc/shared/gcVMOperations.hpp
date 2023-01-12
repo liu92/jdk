@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2005, 2022, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -71,7 +71,7 @@
 //
 //  VM_GenCollectFull
 //  VM_ParallelGCSystemGC
-//   - these operations preform full collection of heaps of
+//   - these operations perform full collection of heaps of
 //     different kind
 //
 //  VM_Verify
@@ -121,7 +121,6 @@ class VM_GC_Operation: public VM_GC_Sync_Operation {
     _prologue_succeeded = false;
     _gc_count_before    = gc_count_before;
 
-    // A subclass constructor will likely overwrite the following
     _gc_cause           = _cause;
 
     _gc_locked = false;

@@ -296,7 +296,7 @@ public class BasicTableUI extends TableUI
             } else {
                 totalCount = 0;
                 // A bogus assignment to stop javac from complaining
-                // about unitialized values. In this case, these
+                // about uninitialized values. In this case, these
                 // won't even be used.
                 minX = maxX = minY = maxY = 0;
             }
@@ -617,6 +617,9 @@ public class BasicTableUI extends TableUI
                 }
                 */
             } else if (key == CANCEL_EDITING) {
+                if (table.isEditing()) {
+                    table.getCellEditor().cancelCellEditing();
+                }
                 table.removeEditor();
             } else if (key == SELECT_ALL) {
                 table.selectAll();
@@ -1444,9 +1447,9 @@ public class BasicTableUI extends TableUI
         // JTable's original row height is 16.  To correctly display the
         // contents on Linux we should have set it to 18, Windows 19 and
         // Solaris 20.  As these values vary so much it's too hard to
-        // be backward compatable and try to update the row height, we're
-        // therefor NOT going to adjust the row height based on font.  If the
-        // developer changes the font, it's there responsability to update
+        // be backward compatible and try to update the row height, we're
+        // therefore NOT going to adjust the row height based on font.  If the
+        // developer changes the font, it's their responsibility to update
         // the row height.
 
         LookAndFeel.installProperty(table, "opaque", Boolean.TRUE);
@@ -1872,23 +1875,6 @@ public class BasicTableUI extends TableUI
             comp = comp.getParent();
         }
 
-        if (comp != null && !(comp instanceof JViewport) && !(comp instanceof JScrollPane)) {
-            // We did rMax-1 to paint the same number of rows that are drawn on console
-            // otherwise 1 extra row is printed per page than that are displayed
-            // when there is no scrollPane and we do printing of table
-            // but not when rmax is already pointing to index of last row
-            // and if there is any selected rows
-            if (rMax != (table.getRowCount() - 1) &&
-                    (table.getSelectedRow() == -1)) {
-                // Do not decrement rMax if rMax becomes
-                // less than or equal to rMin
-                // else cells will not be painted
-                if (rMax - rMin > 1) {
-                    rMax = rMax - 1;
-                }
-            }
-        }
-
         // Paint the grid.
         paintGrid(g, rMin, rMax, cMin, cMax);
 
@@ -2224,10 +2210,10 @@ public class BasicTableUI extends TableUI
         /**
          * Create a Transferable to use as the source for a data transfer.
          *
-         * @param c  The component holding the data to be transfered.  This
+         * @param c  The component holding the data to be transferred.  This
          *  argument is provided to enable sharing of TransferHandlers by
          *  multiple components.
-         * @return  The representation of the data to be transfered.
+         * @return  The representation of the data to be transferred.
          *
          */
         protected Transferable createTransferable(JComponent c) {

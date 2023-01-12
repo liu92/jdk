@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Azul Systems, Inc. All rights reserved.
+ * Copyright (c) 2022, Azul Systems, Inc. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,7 +30,7 @@ import java.security.NoSuchAlgorithmException;
 import java.security.cert.CertificateEncodingException;
 import java.security.cert.X509Certificate;
 import java.util.Arrays;
-import java.util.Hashtable;
+import java.util.Locale;
 
 /**
  * This class implements the Channel Binding for TLS as defined in
@@ -101,7 +101,7 @@ public class TlsChannelBinding {
             final byte[] prefix =
                 TlsChannelBindingType.TLS_SERVER_END_POINT.getName().concat(":").getBytes();
             String hashAlg = serverCertificate.getSigAlgName().
-                    replace("SHA", "SHA-").toUpperCase();
+                    toUpperCase(Locale.ENGLISH).replace("SHA", "SHA-");
             int ind = hashAlg.indexOf("WITH");
             if (ind > 0) {
                 hashAlg = hashAlg.substring(0, ind);

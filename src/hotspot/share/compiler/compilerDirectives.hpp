@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2022, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -42,6 +42,7 @@
     cflags(BreakAtCompile,          bool, false, BreakAtCompile) \
     cflags(Log,                     bool, LogCompilation, Unknown) \
     cflags(PrintAssembly,           bool, PrintAssembly, PrintAssembly) \
+    cflags(PrintCompilation,        bool, PrintCompilation, PrintCompilation) \
     cflags(PrintInlining,           bool, PrintInlining, PrintInlining) \
     cflags(PrintNMethods,           bool, PrintNMethods, PrintNMethods) \
     cflags(BackgroundCompilation,   bool, BackgroundCompilation, BackgroundCompilation) \
@@ -66,6 +67,7 @@
     cflags(PrintIntrinsics,         bool, PrintIntrinsics, PrintIntrinsics) \
 NOT_PRODUCT(cflags(TraceOptoPipelining, bool, TraceOptoPipelining, TraceOptoPipelining)) \
 NOT_PRODUCT(cflags(TraceOptoOutput,     bool, TraceOptoOutput, TraceOptoOutput)) \
+NOT_PRODUCT(cflags(TraceEscapeAnalysis, bool, false, TraceEscapeAnalysis)) \
 NOT_PRODUCT(cflags(PrintIdeal,          bool, PrintIdeal, PrintIdeal)) \
 NOT_PRODUCT(cflags(PrintIdealPhase,     ccstrlist, "", PrintIdealPhase)) \
     cflags(TraceSpilling,           bool, TraceSpilling, TraceSpilling) \
@@ -127,6 +129,8 @@ public:
   bool is_intrinsic_disabled(const methodHandle& method);
   static ccstrlist canonicalize_control_intrinsic(ccstrlist option_value);
   void finalize(outputStream* st);
+  bool is_c1(CompilerDirectives* directive) const;
+  bool is_c2(CompilerDirectives* directive) const;
 
   typedef enum {
 #define enum_of_flags(name, type, dvalue, cc_flag) name##Index,

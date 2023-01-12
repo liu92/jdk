@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2022, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -58,11 +58,6 @@ import jdk.javadoc.internal.doclets.toolkit.Resources;
  * generates "package-list"(lists all the packages which are getting
  * documented) file in the current or the destination directory, while
  * generating the documentation.
- *
- *  <p><b>This is NOT part of any supported API.
- *  If you write code that depends on this, you do so at your own risk.
- *  This code and its internal interfaces are subject to change or
- *  deletion without notice.</b>
  */
 public class Extern {
 
@@ -226,7 +221,7 @@ public class Extern {
 
     /**
      * Check whether links to platform documentation are configured. If not then configure
-     * links using the the documentation URL defined in {@code linkPlatformProperties} or the
+     * links using the documentation URL defined in {@code linkPlatformProperties} or the
      * default documentation URL if that parameter is {@code null}.
      *
      * @param linkPlatformProperties path or URL to properties file containing
@@ -583,7 +578,8 @@ public class Extern {
 
     public boolean isUrl (String urlCandidate) {
         try {
-            new URL(urlCandidate);
+            @SuppressWarnings("deprecation")
+            var _unused = new URL(urlCandidate);
             //No exception was thrown, so this must really be a URL.
             return true;
         } catch (MalformedURLException e) {
@@ -592,6 +588,7 @@ public class Extern {
         }
     }
 
+    @SuppressWarnings("deprecation")
     private URL toURL(String url) throws Fault {
         try {
             return new URL(url);
@@ -637,7 +634,8 @@ public class Extern {
                         String loc = http.getHeaderField("Location");
                         URL target = null;
                         if (loc != null) {
-                            target = new URL(base, loc);
+                            @SuppressWarnings("deprecation")
+                            var _unused = target = new URL(base, loc);
                         }
                         http.disconnect();
                         if (target == null || redirects >= 5) {

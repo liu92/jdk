@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2022, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -28,6 +28,7 @@ package sun.lwawt.macosx;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
+import java.awt.IllegalComponentStateException;
 import java.awt.KeyboardFocusManager;
 import java.awt.Point;
 import java.awt.Window;
@@ -469,7 +470,16 @@ class CAccessibility implements PropertyChangeListener {
     public static Accessible accessibilityHitTest(final Container parent, final float hitPointX, final float hitPointY) {
         return invokeAndWait(new Callable<Accessible>() {
             public Accessible call() throws Exception {
-                final Point p = parent.getLocationOnScreen();
+                if (parent == null) {
+                    return null;
+                }
+
+                final Point p;
+                try {
+                    p = parent.getLocationOnScreen();
+                } catch (IllegalComponentStateException ice) {
+                    return null;
+                }
 
                 // Make it into local coords
                 final Point localPoint = new Point((int)(hitPointX - p.getX()), (int)(hitPointY - p.getY()));
@@ -507,6 +517,13 @@ class CAccessibility implements PropertyChangeListener {
                 return ac.getAccessibleAction();
             }
         }, c);
+    }
+
+    // This method is called from the native in CommonComponentAccessibility.m
+    private static int getAccessibleActionCount(final AccessibleAction aa, final Component c) {
+        if (aa == null) return 0;
+
+        return invokeAndWait(aa::getAccessibleActionCount, c);
     }
 
     public static boolean isEnabled(final Accessible a, final Component c) {
@@ -803,6 +820,26 @@ class CAccessibility implements PropertyChangeListener {
                 }
 
                 return allChildren.toArray();
+            }
+        }, c);
+    }
+
+    // This method is called from the native in ComboBoxAccessibility.m
+    private static Accessible getAccessibleComboboxValue(Accessible a, Component c) {
+        if (a == null) return null;
+
+        return invokeAndWait(new Callable<Accessible>() {
+            @Override
+            public Accessible call() throws Exception {
+                AccessibleContext ac = a.getAccessibleContext();
+                if (ac != null) {
+                    AccessibleSelection as = ac.getAccessibleSelection();
+                    if (as != null) {
+                        return as.getAccessibleSelection(0);
+                    }
+                }
+
+                return null;
             }
         }, c);
     }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2022, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -62,7 +62,6 @@ import jdk.internal.reflect.ReflectionFactory;
 import jdk.internal.access.SharedSecrets;
 import jdk.internal.access.JavaSecurityAccess;
 import sun.reflect.misc.ReflectUtil;
-import static java.io.ObjectStreamField.*;
 
 /**
  * Serialization's descriptor for classes.  It contains the name and
@@ -80,7 +79,7 @@ import static java.io.ObjectStreamField.*;
  *      <cite>Java Object Serialization Specification,</cite> Section 4, "Class Descriptors"</a>
  * @since   1.1
  */
-public class ObjectStreamClass implements Serializable {
+public final class ObjectStreamClass implements Serializable {
 
     /** serialPersistentFields value indicating no serializable fields */
     public static final ObjectStreamField[] NO_FIELDS =
@@ -709,8 +708,9 @@ public class ObjectStreamClass implements Serializable {
             try {
                 fields[i] = new ObjectStreamField(fname, signature, false);
             } catch (RuntimeException e) {
-                throw (IOException) new InvalidClassException(name,
-                    "invalid descriptor for field " + fname).initCause(e);
+                throw new InvalidClassException(name,
+                                                "invalid descriptor for field " +
+                                                fname, e);
             }
         }
         computeFieldOffsets();
@@ -1563,10 +1563,10 @@ public class ObjectStreamClass implements Serializable {
         StringBuilder sb = new StringBuilder();
         sb.append('(');
         for (int i = 0; i < paramTypes.length; i++) {
-            appendClassSignature(sb, paramTypes[i]);
+            sb.append(paramTypes[i].descriptorString());
         }
         sb.append(')');
-        appendClassSignature(sb, retType);
+        sb.append(retType.descriptorString());
         return sb.toString();
     }
 
@@ -1647,7 +1647,7 @@ public class ObjectStreamClass implements Serializable {
 
         ObjectStreamField[] boundFields =
             new ObjectStreamField[serialPersistentFields.length];
-        Set<String> fieldNames = new HashSet<>(serialPersistentFields.length);
+        Set<String> fieldNames = HashSet.newHashSet(serialPersistentFields.length);
 
         for (int i = 0; i < serialPersistentFields.length; i++) {
             ObjectStreamField spf = serialPersistentFields[i];
@@ -1880,7 +1880,7 @@ public class ObjectStreamClass implements Serializable {
         public MemberSignature(Field field) {
             member = field;
             name = field.getName();
-            signature = getClassSignature(field.getType());
+            signature = field.getType().descriptorString();
         }
 
         public MemberSignature(Constructor<?> cons) {

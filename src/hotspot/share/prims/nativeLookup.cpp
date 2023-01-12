@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2022, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -117,7 +117,7 @@ both map to
   Java_package_my_1class_method
 
 To address this potential conflict we need only check if the character after
-/ is a digit 0..3, or if the first character after an injected '_' seperator
+/ is a digit 0..3, or if the first character after an injected '_' separator
 is a digit 0..3. If we encounter an invalid identifier we reset the
 stringStream and return false. Otherwise the stringStream contains the mapped
 name and we return true.
@@ -202,8 +202,7 @@ extern "C" {
   void JNICALL JVM_RegisterMethodHandleMethods(JNIEnv *env, jclass unsafecls);
   void JNICALL JVM_RegisterReferencesMethods(JNIEnv *env, jclass unsafecls);
   void JNICALL JVM_RegisterUpcallHandlerMethods(JNIEnv *env, jclass unsafecls);
-  void JNICALL JVM_RegisterProgrammableUpcallHandlerMethods(JNIEnv *env, jclass unsafecls);
-  void JNICALL JVM_RegisterProgrammableInvokerMethods(JNIEnv *env, jclass unsafecls);
+  void JNICALL JVM_RegisterUpcallLinkerMethods(JNIEnv *env, jclass unsafecls);
   void JNICALL JVM_RegisterNativeEntryPointMethods(JNIEnv *env, jclass unsafecls);
   void JNICALL JVM_RegisterPerfMethods(JNIEnv *env, jclass perfclass);
   void JNICALL JVM_RegisterWhiteBoxMethods(JNIEnv *env, jclass wbclass);
@@ -221,9 +220,8 @@ static JNINativeMethod lookup_special_native_methods[] = {
   { CC"Java_jdk_internal_misc_Unsafe_registerNatives",             NULL, FN_PTR(JVM_RegisterJDKInternalMiscUnsafeMethods) },
   { CC"Java_java_lang_invoke_MethodHandleNatives_registerNatives", NULL, FN_PTR(JVM_RegisterMethodHandleMethods) },
   { CC"Java_jdk_internal_foreign_abi_UpcallStubs_registerNatives",      NULL, FN_PTR(JVM_RegisterUpcallHandlerMethods) },
-  { CC"Java_jdk_internal_foreign_abi_ProgrammableUpcallHandler_registerNatives",      NULL, FN_PTR(JVM_RegisterProgrammableUpcallHandlerMethods) },
-  { CC"Java_jdk_internal_foreign_abi_ProgrammableInvoker_registerNatives",      NULL, FN_PTR(JVM_RegisterProgrammableInvokerMethods) },
-  { CC"Java_jdk_internal_invoke_NativeEntryPoint_registerNatives",      NULL, FN_PTR(JVM_RegisterNativeEntryPointMethods) },
+  { CC"Java_jdk_internal_foreign_abi_UpcallLinker_registerNatives",      NULL, FN_PTR(JVM_RegisterUpcallLinkerMethods) },
+  { CC"Java_jdk_internal_foreign_abi_NativeEntryPoint_registerNatives",      NULL, FN_PTR(JVM_RegisterNativeEntryPointMethods) },
   { CC"Java_jdk_internal_perf_Perf_registerNatives",               NULL, FN_PTR(JVM_RegisterPerfMethods)         },
   { CC"Java_sun_hotspot_WhiteBox_registerNatives",                 NULL, FN_PTR(JVM_RegisterWhiteBoxMethods)     },
   { CC"Java_jdk_test_whitebox_WhiteBox_registerNatives",           NULL, FN_PTR(JVM_RegisterWhiteBoxMethods)     },
@@ -257,7 +255,7 @@ address NativeLookup::lookup_style(const methodHandle& method, char* pure_name, 
   // If the loader is null we have a system class, so we attempt a lookup in
   // the native Java library. This takes care of any bootstrapping problems.
   // Note: It is critical for bootstrapping that Java_java_lang_ClassLoader_findNative
-  // gets found the first time around - otherwise an infinite loop can occure. This is
+  // gets found the first time around - otherwise an infinite loop can occur. This is
   // another VM/library dependency
   Handle loader(THREAD, method->method_holder()->class_loader());
   if (loader.is_null()) {
@@ -357,26 +355,8 @@ address NativeLookup::lookup_entry(const methodHandle& method, TRAPS) {
   return entry; // NULL indicates not found
 }
 
-void* NativeLookup::dll_load(const methodHandle& method) {
-  if (method->has_native_function()) {
-
-    address current_entry = method->native_function();
-
-    char dll_name[JVM_MAXPATHLEN];
-    dll_name[0] = '\0';
-    int offset;
-    bool ret = os::dll_address_to_library_name(current_entry, dll_name, sizeof(dll_name), &offset);
-    if (ret && dll_name[0] != '\0') {
-      char ebuf[32];
-      return os::dll_load(dll_name, ebuf, sizeof(ebuf));
-    }
-  }
-
-  return NULL;
-}
-
 // Check if there are any JVM TI prefixes which have been applied to the native method name.
-// If any are found, remove them before attemping the look up of the
+// If any are found, remove them before attempting the look up of the
 // native implementation again.
 // See SetNativeMethodPrefix in the JVM TI Spec for more details.
 address NativeLookup::lookup_entry_prefixed(const methodHandle& method, TRAPS) {
@@ -418,12 +398,12 @@ address NativeLookup::lookup_base(const methodHandle& method, TRAPS) {
   address entry = NULL;
   ResourceMark rm(THREAD);
 
-  entry = lookup_entry(method, THREAD);
+  entry = lookup_entry(method, CHECK_NULL);
   if (entry != NULL) return entry;
 
   // standard native method resolution has failed.  Check if there are any
   // JVM TI prefixes which have been applied to the native method name.
-  entry = lookup_entry_prefixed(method, THREAD);
+  entry = lookup_entry_prefixed(method, CHECK_NULL);
   if (entry != NULL) return entry;
 
   // Native function not found, throw UnsatisfiedLinkError
